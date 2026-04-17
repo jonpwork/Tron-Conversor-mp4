@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tron Conversor mp4 - Emc³</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root { --neon-blue: #00f2ff; --neon-purple: #bc13fe; --success-green: #2ecc71; --bg-dark: #0a0b10; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg-dark); color: white; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+        
+        /* Logo Minimalista SVG */
+        .logo-container { margin-bottom: 20px; text-align: center; }
+        .logo-svg { width: 80px; filter: drop-shadow(0 0 10px var(--neon-blue)); }
+
+        .glass-card { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 30px; padding: 40px; width: 100%; max-width: 500px; box-shadow: 0 15px 35px rgba(0,0,0,0.5); position: relative; }
+        
+        h1 { font-weight: 300; letter-spacing: 5px; text-transform: uppercase; text-align: center; margin-bottom: 5px; color: var(--neon-blue); font-size: 1.5rem; }
+        .credentials { text-align: center; font-size: 0.7rem; color: #666; letter-spacing: 2px; margin-bottom: 30px; text-transform: uppercase; }
+
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-size: 0.8rem; color: #aaa; }
+        input[type="file"] { width: 100%; padding: 12px; background: rgba(0,0,0,0.4); border: 1px dashed #333; border-radius: 12px; color: #fff; cursor: pointer; transition: 0.3s; }
+        input[type="file"]:hover { border-color: var(--neon-blue); }
+
+        /* Botões e Animação */
+        .main-btn { width: 100%; padding: 18px; border: none; border-radius: 15px; font-weight: 600; cursor: pointer; transition: 0.4s; text-transform: uppercase; margin-bottom: 10px; position: relative; overflow: hidden; }
+        .btn-convert { background: linear-gradient(45deg, var(--neon-blue), #0072ff); color: white; }
+        .btn-transcribe { background: rgba(255,255,255,0.05); color: #ccc; border: 1px solid #333; }
+
+        .loading-spinner { display: none; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; margin: 0 auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Mensagem de Sucesso */
+        #status-msg { display: none; background: rgba(46, 204, 113, 0.2); color: var(--success-green); padding: 15px; border-radius: 12px; text-align: center; margin-top: 20px; border: 1px solid var(--success-green); font-weight: 600; }
+
+        /* WhatsApp Floating */
+        .wa-float { position: fixed; bottom: 30px; right: 30px; background: #25d366; width: 60px; height: 60px; border-radius: 50%; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: 0.3s; z-index: 100; }
+        .wa-float:hover { transform: scale(1.1); }
+
+        #transcription-res { margin-top: 25px; display: none; animation: fadeIn 0.5s; }
+        textarea { width: 100%; height: 120px; background: rgba(0,0,0,0.3); border: 1px solid #333; border-radius: 12px; color: #eee; padding: 10px; resize: none; font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+
+    <div class="logo-container">
+        <svg class="logo-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M50 15L85 75H15L50 15Z" stroke="#00f2ff" stroke-width="2"/>
+            <circle cx="50" cy="50" r="10" stroke="#bc13fe" stroke-width="2"/>
+        </svg>
+        <h1>Tron Conversor</h1>
+        <div class="credentials">Emc³ | dev: Jon Padilha</div>
+    </div>
+
+    <div class="glass-card">
+        <div class="input-group">
+            <label>Áudio Potente (MP3/WAV)</label>
+            <input type="file" id="audioInput" accept="audio/*">
+        </div>
+        <div class="input-group">
+            <label>Fundo Visual (Imagem)</label>
+            <input type="file" id="imageInput" accept="image/*">
+        </div>
+
+        <button id="convertBtn" class="main-btn btn-convert" onclick="process('convert')">
+            <span class="btn-text">Gerar Vídeo Legendado</span>
+            <div class="loading-spinner"></div>
+        </button>
+
+        <button id="transcribeBtn" class="main-btn btn-transcribe" onclick="process('transcribe')">
+            Transcrever Áudio
+        </button>
+
+        <div id="status-msg">🚀 MP4 GERADO COM SUCESSO!</div>
+
+        <div id="transcription-res">
+            <textarea id="text-box" readonly></textarea>
+            <button class="main-btn btn-transcribe" style="margin-top:10px" onclick="copyText()">Copiar Texto</button>
+        </div>
+    </div>
+
+    <a href="https://wa.me/55219644440418" target="_blank" class="wa-float">
+        <svg width="30" height="30" fill="white" viewBox="0 0 16 16">
+            <path d="M13.601 2.326A7.854 7.854 0 0 0 7.994 0C3.627 0 .068 3.558.064 7.926c0 1.399.366 2.76 1.06 3.973L0 16l4.104-1.077A7.888 7.888 0 0 0 7.994 14.5c4.367 0 7.926-3.558 7.93-7.93A7.898 7.898 0 0 0 13.6 2.326zM7.994 13.066c-1.224 0-2.427-.33-3.475-.955l-.25-.148-2.583.678.69-2.526-.162-.258a6.591 6.591 0 0 1-1.012-3.454c0-3.63 2.961-6.592 6.596-6.592 1.756 0 3.406.684 4.646 1.926 1.242 1.242 1.925 2.89 1.923 4.646-.002 3.631-2.96 6.592-6.59 6.592zm3.615-4.934c-.197-.099-1.17-.578-1.353-.646-.182-.065-.315-.099-.445.099-.133.197-.513.646-.627.775-.114.133-.232.148-.43.05-.197-.1-.836-.308-1.592-.985-.59-.525-.985-1.175-1.103-1.372-.114-.198-.011-.304.088-.403.087-.088.197-.232.296-.346.1-.114.133-.198.198-.33.065-.134.034-.248-.015-.347-.05-.099-.445-1.076-.612-1.47-.16-.389-.323-.335-.445-.34-.114-.007-.247-.007-.38-.007a.729.729 0 0 0-.529.247c-.182.198-.691.677-.691 1.654 0 .977.71 1.916.81 2.049.098.133 1.394 2.132 3.383 2.992.47.205.84.326 1.129.418.475.152.904.129 1.246.08.38-.058 1.17-.479 1.338-.942.164-.464.164-.86.114-.943-.049-.084-.182-.133-.38-.232z"/>
+        </svg>
+    </a>
+
+    <script>
+        async function process(action) {
+            const audio = document.getElementById('audioInput').files[0];
+            const image = document.getElementById('imageInput').files[0];
+            const btn = document.getElementById('convertBtn');
+            const btnText = btn.querySelector('.btn-text');
+            const spinner = btn.querySelector('.loading-spinner');
+            const statusMsg = document.getElementById('status-msg');
+
+            if (!audio) return alert("Amor, falta o áudio!");
+
+            // Iniciar animação
+            btnText.style.display = 'none';
+            spinner.style.display = 'block';
+            btn.disabled = true;
+            statusMsg.style.display = 'none';
+
+            const formData = new FormData();
+            formData.append('audio', audio);
+            if(image) formData.append('image', image);
+            formData.append('action', action);
+
+            try {
+                const response = await fetch('/process', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (action === 'convert') {
+                    statusMsg.style.display = 'block';
+                    // Trigger Auto Download
+                    const link = document.createElement('a');
+                    link.href = data.video_url;
+                    link.download = 'Tron_Conversor_Output.mp4';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                } else {
+                    document.getElementById('transcription-res').style.display = 'block';
+                    document.getElementById('text-box').value = data.transcription;
+                }
+            } catch (e) {
+                alert("Erro nos motores... verifica o terminal!");
+            } finally {
+                btnText.style.display = 'block';
+                spinner.style.display = 'none';
+                btn.disabled = false;
+            }
+        }
+
+        function copyText() {
+            const box = document.getElementById('text-box');
+            box.select();
+            document.execCommand('copy');
+            alert("Copiado com sucesso!");
+        }
+    </script>
+</body>
+</html>
