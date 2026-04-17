@@ -1,0 +1,6 @@
+flask
+whisper
+moviepy
+gunicorn
+openai-whisper
+setuptools-rust
