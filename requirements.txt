@@ -1,4 +1,0 @@
-flask
-moviepy
-groq
-gunicorn
