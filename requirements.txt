@@ -1,6 +1,4 @@
 flask
-whisper
 moviepy
+groq
 gunicorn
-openai-whisper
-setuptools-rust
