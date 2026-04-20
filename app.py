@@ -216,11 +216,16 @@ def converter():
             if ass_path is None and modo_leg == "estatica" and legenda_txt:
                 vf = build_vf_estatico(w_str, h_str, legenda_txt)
 
-            cmd = [
-                "ffmpeg", "-y",
-                "-loop", "1",
-                "-i", img_path,
-                "-i", aud_path,
+            # --- A CURA DEFINITIVA PARA O FFMPEG ---
+            # Identificamos se o arquivo é um vídeo ou uma imagem estática
+            cmd = ["ffmpeg", "-y"]
+            if img_ext in {".mp4", ".mov", ".webm", ".mkv", ".avi", ".gif"}:
+                cmd.extend(["-stream_loop", "-1", "-i", img_path, "-i", aud_path])
+            else:
+                # O SEGREDO: Força o uso do formato 'image2' para a imagem garantir que o -loop exista
+                cmd.extend(["-f", "image2", "-loop", "1", "-i", img_path, "-i", aud_path])
+
+            cmd.extend([
                 "-vf", vf,
                 "-map", "0:v", "-map", "1:a",
                 "-c:v", "libx264",
@@ -234,14 +239,13 @@ def converter():
                 "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
                 "-shortest", "-movflags", "+faststart",
                 out_path,
-            ]
+            ])
+            # ----------------------------------------
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
 
         if result.returncode != 0:
-            # MAGIA DA AURORA: Fazendo o erro imprimir nos logs do Google Cloud
             print(f"==================== ERRO FFMPEG ====================\n{result.stderr}\n=====================================================", flush=True)
-            
             lines = result.stderr.splitlines()
             err = [l for l in lines if any(k in l for k in ("Error","error","Invalid","failed","Cannot","No such"))]
             return f"Erro FFmpeg:\n{chr(10).join(err[-15:]) or result.stderr[-1000:]}", 500
@@ -258,7 +262,6 @@ def converter():
         return "Tempo limite excedido (20 min).", 504
     except Exception:
         err_trace = traceback.format_exc()
-        # Imprimindo qualquer erro interno oculto
         print(f"==================== ERRO INTERNO ====================\n{err_trace}\n======================================================", flush=True)
         return f"Erro interno:\n{err_trace}", 500
 
@@ -273,4 +276,4 @@ def handle_exception(e):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-                    
+            
