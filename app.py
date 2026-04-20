@@ -6,7 +6,10 @@ app = Flask(__name__)
 
 # --- CÓDIGO DETETIVE (Com logs para o Google Cloud) ---
 
-@app.route("/converter", methods=["POST"])
+@app.route("/test")
+def test():
+    return "O Tron está vivo e funcionando!"
+    @app.route("/converter", methods=["POST"])
 def converter():
     print("DEBUG: [1] Iniciando rota /converter", flush=True)
     
