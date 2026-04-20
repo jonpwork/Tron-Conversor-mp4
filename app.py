@@ -211,33 +211,37 @@ def converter():
                         with open(ass_path, "w", encoding="utf-8") as f:
                             f.write(gerar_ass(dados_ass, w, h, modo_dados))
                         
-                        # Escapando os caminhos para o filtro ASS do FFmpeg
                         ass_path_esc = _esc_path(ass_path)
-                        fdir_esc     = _esc_path(FONTS_DIR)
-                        
-                        fonts_arg = f":fontsdir='{fdir_esc}'" if os.path.isdir(FONTS_DIR) else ""
-                        vf = f"{scale_vf},ass='{ass_path_esc}'{fonts_arg}"
-                    except Exception:
+                        # Não passa fontsdir — evita overhead de carregamento de fonte no libass
+                        vf = f"{scale_vf},ass='{ass_path_esc}'"
+                        print(f"DEBUG: [ass] usando filtro ass sem fontsdir")
+                    except Exception as e:
+                        print(f"DEBUG: [ass] falhou ({e}), sem legenda")
                         ass_path = None
 
             if ass_path is None and modo_leg == "estatica" and legenda_txt:
                 vf = build_vf_estatico(w_str, h_str, legenda_txt)
 
             # Obtém duração real do áudio para usar -t explícito (evita loop infinito)
-            probe = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", aud_path],
-                capture_output=True, text=True, timeout=30
-            )
+            audio_duration = None
             try:
+                probe = subprocess.run(
+                    ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                     "-of", "default=noprint_wrappers=1:nokey=1", aud_path],
+                    capture_output=True, text=True, timeout=30
+                )
                 audio_duration = float(probe.stdout.strip())
-            except (ValueError, TypeError):
-                audio_duration = None
+                print(f"DEBUG: [4] Duração do áudio: {audio_duration:.1f}s")
+            except Exception as e:
+                print(f"DEBUG: [4] ffprobe falhou ({e}), usando -shortest como fallback")
+
+            print(f"DEBUG: [5] vf={vf[:120]}")
 
             cmd = [
                 "ffmpeg", "-y",
+                "-f", "image2",
                 "-loop", "1",
-                "-framerate", "1",          # gera apenas 1 fps na entrada (mais rápido)
+                "-framerate", "1",
                 "-i", img_path,
                 "-i", aud_path,
                 "-vf", vf,
@@ -246,26 +250,29 @@ def converter():
                 "-preset", "ultrafast",
                 "-tune", "stillimage",
                 "-crf", "35",
-                "-r", "1",                  # 1 fps de saída (imagem estática não precisa de mais)
-                "-g", "1",
+                "-r", "1",
+                "-g", "25",
                 "-pix_fmt", "yuv420p",
                 "-threads", CPU_CORES,
                 "-x264-params", "rc-lookahead=0:ref=1:bframes=0:weightp=0",
                 "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
                 "-movflags", "+faststart",
+                "-async", "1",
             ]
 
-            # -t explícito garante que o FFmpeg sabe quando parar (sem depender do -shortest)
+            # -t explícito: FFmpeg sabe quando parar sem depender do -shortest
             if audio_duration:
-                cmd += ["-t", str(audio_duration)]
+                cmd += ["-t", str(audio_duration + 0.5)]
             else:
                 cmd += ["-shortest"]
 
             cmd.append(out_path)
+            print(f"DEBUG: [6] Rodando ffmpeg, timeout={min(600, max(120, int((audio_duration or 300)*2)))}s")
 
-            # Timeout baseado na duração: mínimo 120s, máximo 600s (10min)
-            timeout_s = min(600, max(120, int(audio_duration or 300) * 3)) if audio_duration else 600
+            # Timeout: duração x2, mínimo 120s, máximo 600s
+            timeout_s = min(600, max(120, int((audio_duration or 300) * 2)))
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+            print(f"DEBUG: [7] ffmpeg retornou código {result.returncode}")
 
         if result.returncode != 0:
             lines = result.stderr.splitlines()
