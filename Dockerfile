@@ -23,3 +23,4 @@ CMD gunicorn app:app \
     --timeout 0 \
     --worker-class gthread \
     --log-level info
+    
