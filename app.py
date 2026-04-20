@@ -235,6 +235,26 @@ def converter():
             except Exception as e:
                 print(f"DEBUG: [4] ffprobe falhou ({e}), usando -shortest como fallback")
 
+            # Pré-redimensiona a imagem para exatamente a resolução alvo + 10%
+            # CRÍTICO: evita OOM — PNG 4K+ descomprimida consome vários GB de RAM no FFmpeg
+            max_dim = max(w, h)
+            img_resized = os.path.join(tmp, "img_resized.jpg")
+            try:
+                resize_cmd = [
+                    "ffmpeg", "-y", "-i", img_path,
+                    "-vf", f"scale='if(gt(iw,{max_dim}),{max_dim},iw)':'if(gt(ih,{max_dim}),{max_dim},ih)':force_original_aspect_ratio=decrease",
+                    "-q:v", "2",
+                    img_resized
+                ]
+                r = subprocess.run(resize_cmd, capture_output=True, timeout=60)
+                if r.returncode == 0 and os.path.exists(img_resized) and os.path.getsize(img_resized) > 0:
+                    img_path = img_resized
+                    print(f"DEBUG: [5a] imagem pré-redimensionada para max {max_dim}px OK ({os.path.getsize(img_resized)//1024}KB)")
+                else:
+                    print(f"DEBUG: [5a] resize falhou (rc={r.returncode}), usando original — RISCO OOM")
+            except Exception as e:
+                print(f"DEBUG: [5a] resize erro ({e}), usando original — RISCO OOM")
+
             print(f"DEBUG: [5] vf={vf[:120]}")
 
             cmd = [
@@ -254,7 +274,9 @@ def converter():
                 "-g", "25",
                 "-pix_fmt", "yuv420p",
                 "-threads", CPU_CORES,
-                "-x264-params", "rc-lookahead=0:ref=1:bframes=0:weightp=0",
+                "-x264-params", "rc-lookahead=0:ref=1:bframes=0:weightp=0:vbv-maxrate=1000:vbv-bufsize=1000",
+                # Limita buffer de memória interna do x264
+
                 "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
                 "-movflags", "+faststart",
                 "-async", "1",
