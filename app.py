@@ -6,7 +6,6 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-CPU_CORES    = str(multiprocessing.cpu_count())
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 FONTS_DIR    = os.path.join(BASE_DIR, "fonts")
 os.makedirs(FONTS_DIR, exist_ok=True)
@@ -152,6 +151,7 @@ def build_vf_estatico(w, h, legenda):
 
 @app.route("/converter", methods=["POST"])
 def converter():
+    print("DEBUG: [1] Iniciando /converter", flush=True)
     img_file      = request.files.get("imagem")
     aud_file      = request.files.get("audio")
     resolucao     = request.form.get("resolucao",    "1080x1080")
@@ -170,6 +170,7 @@ def converter():
 
     try:
         with tempfile.TemporaryDirectory() as tmp:
+            print(f"DEBUG: [2] Pasta tmp: {tmp}", flush=True)
             img_ext = os.path.splitext(img_file.filename or "img.jpg")[1].lower() or ".jpg"
             aud_ext = os.path.splitext(aud_file.filename or "aud.mp3")[1].lower()
             if aud_ext not in _EXT_AUD: aud_ext = ".mp3"
@@ -177,10 +178,8 @@ def converter():
             img_path = os.path.join(tmp, "img" + img_ext)
             aud_path = os.path.join(tmp, "aud" + aud_ext)
 
-            with open(img_path, "wb") as f:
-                f.write(img_file.read())
-            with open(aud_path, "wb") as f:
-                f.write(aud_file.read())
+            with open(img_path, "wb") as f: f.write(img_file.read())
+            with open(aud_path, "wb") as f: f.write(aud_file.read())
 
             fd, out_path = tempfile.mkstemp(suffix=".mp4")
             os.close(fd)
@@ -207,15 +206,14 @@ def converter():
                         
                         ass_path_esc = _esc_path(ass_path)
                         fdir_esc     = _esc_path(FONTS_DIR)
-                        
                         fonts_arg = f":fontsdir='{fdir_esc}'" if os.path.isdir(FONTS_DIR) else ""
                         vf = f"{scale_vf},ass='{ass_path_esc}'{fonts_arg}"
-                    except Exception:
-                        ass_path = None
+                    except Exception: ass_path = None
 
             if ass_path is None and modo_leg == "estatica" and legenda_txt:
                 vf = build_vf_estatico(w_str, h_str, legenda_txt)
 
+            print("DEBUG: [3] Iniciando ffmpeg", flush=True)
             cmd = ["ffmpeg", "-y"]
             if img_ext in {".mp4", ".mov", ".webm", ".mkv", ".avi", ".gif"}:
                 cmd.extend(["-stream_loop", "-1", "-i", img_path, "-i", aud_path])
@@ -228,20 +226,19 @@ def converter():
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-tune", "stillimage",
-                "-crf", "35",
+                "-crf", "28",
                 "-r", "2", "-g", "2",
                 "-pix_fmt", "yuv420p",
-                "-threads", CPU_CORES,
-                "-x264-params", "rc-lookahead=0:ref=1:bframes=0:weightp=0",
+                "-threads", "2",
                 "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
                 "-shortest", "-movflags", "+faststart",
                 out_path,
             ])
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
 
         if result.returncode != 0:
-            print(f"==================== ERRO FFMPEG ====================\n{result.stderr}", flush=True)
+            print(f"DEBUG: [ERRO FFMPEG] {result.stderr}", flush=True)
             return f"Erro FFmpeg", 500
 
         @after_this_request
@@ -254,7 +251,7 @@ def converter():
 
     except Exception:
         err_trace = traceback.format_exc()
-        print(f"==================== ERRO INTERNO ====================\n{err_trace}", flush=True)
+        print(f"DEBUG: [ERRO INTERNO] {err_trace}", flush=True)
         return f"Erro interno", 500
 
 @app.route("/healthz")
@@ -264,3 +261,4 @@ def healthz():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
+            
