@@ -6,6 +6,7 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
+CPU_CORES    = str(multiprocessing.cpu_count())
 BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 FONTS_DIR    = os.path.join(BASE_DIR, "fonts")
 os.makedirs(FONTS_DIR, exist_ok=True)
@@ -27,7 +28,10 @@ RESOLUTIONS = {
     "1280x720":  ("1280", "720"),
 }
 
+# --- FUNÇÕES DE AUXÍLIO PARA FFmpeg ---
+
 def _esc_path(p):
+    """Escapa caminhos para filtros do FFmpeg (importante para Windows/Render)"""
     return p.replace("\\", "/").replace(":", "\\:")
 
 def _esc(txt):
@@ -36,6 +40,8 @@ def _esc(txt):
 def _ts_ass(s):
     h=int(s//3600); m=int((s%3600)//60); sc=int(s%60); cs=int(round((s-int(s))*100))
     return f"{h}:{m:02d}:{sc:02d}.{cs:02d}"
+
+# --- ROTAS E LÓGICA ---
 
 @app.route("/")
 def index():
@@ -143,6 +149,7 @@ def build_vf_estatico(w, h, legenda):
     if not legenda.strip(): return scale
     txt=_esc(legenda.strip())
     
+    # Escapando o caminho da fonte para o filtro drawtext
     fpath_esc = _esc_path(FONT_PATH)
     font=f"fontfile='{fpath_esc}'" if os.path.exists(FONT_PATH) else "font=Impact"
     
@@ -151,7 +158,6 @@ def build_vf_estatico(w, h, legenda):
 
 @app.route("/converter", methods=["POST"])
 def converter():
-    print("DEBUG: [1] Iniciando /converter", flush=True)
     img_file      = request.files.get("imagem")
     aud_file      = request.files.get("audio")
     resolucao     = request.form.get("resolucao",    "1080x1080")
@@ -170,7 +176,6 @@ def converter():
 
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            print(f"DEBUG: [2] Pasta tmp: {tmp}", flush=True)
             img_ext = os.path.splitext(img_file.filename or "img.jpg")[1].lower() or ".jpg"
             aud_ext = os.path.splitext(aud_file.filename or "aud.mp3")[1].lower()
             if aud_ext not in _EXT_AUD: aud_ext = ".mp3"
@@ -178,8 +183,10 @@ def converter():
             img_path = os.path.join(tmp, "img" + img_ext)
             aud_path = os.path.join(tmp, "aud" + aud_ext)
 
-            with open(img_path, "wb") as f: f.write(img_file.read())
-            with open(aud_path, "wb") as f: f.write(aud_file.read())
+            with open(img_path, "wb") as f:
+                f.write(img_file.read())
+            with open(aud_path, "wb") as f:
+                f.write(aud_file.read())
 
             fd, out_path = tempfile.mkstemp(suffix=".mp4")
             os.close(fd)
@@ -204,42 +211,66 @@ def converter():
                         with open(ass_path, "w", encoding="utf-8") as f:
                             f.write(gerar_ass(dados_ass, w, h, modo_dados))
                         
+                        # Escapando os caminhos para o filtro ASS do FFmpeg
                         ass_path_esc = _esc_path(ass_path)
                         fdir_esc     = _esc_path(FONTS_DIR)
+                        
                         fonts_arg = f":fontsdir='{fdir_esc}'" if os.path.isdir(FONTS_DIR) else ""
                         vf = f"{scale_vf},ass='{ass_path_esc}'{fonts_arg}"
-                    except Exception: ass_path = None
+                    except Exception:
+                        ass_path = None
 
             if ass_path is None and modo_leg == "estatica" and legenda_txt:
                 vf = build_vf_estatico(w_str, h_str, legenda_txt)
 
-            print("DEBUG: [3] Iniciando ffmpeg", flush=True)
-            cmd = ["ffmpeg", "-y"]
-            if img_ext in {".mp4", ".mov", ".webm", ".mkv", ".avi", ".gif"}:
-                cmd.extend(["-stream_loop", "-1", "-i", img_path, "-i", aud_path])
-            else:
-                cmd.extend(["-f", "image2", "-loop", "1", "-i", img_path, "-i", aud_path])
+            # Obtém duração real do áudio para usar -t explícito (evita loop infinito)
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=noprint_wrappers=1:nokey=1", aud_path],
+                capture_output=True, text=True, timeout=30
+            )
+            try:
+                audio_duration = float(probe.stdout.strip())
+            except (ValueError, TypeError):
+                audio_duration = None
 
-            cmd.extend([
+            cmd = [
+                "ffmpeg", "-y",
+                "-loop", "1",
+                "-framerate", "1",          # gera apenas 1 fps na entrada (mais rápido)
+                "-i", img_path,
+                "-i", aud_path,
                 "-vf", vf,
                 "-map", "0:v", "-map", "1:a",
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-tune", "stillimage",
-                "-crf", "28",
-                "-r", "2", "-g", "2",
+                "-crf", "35",
+                "-r", "1",                  # 1 fps de saída (imagem estática não precisa de mais)
+                "-g", "1",
                 "-pix_fmt", "yuv420p",
-                "-threads", "2",
+                "-threads", CPU_CORES,
+                "-x264-params", "rc-lookahead=0:ref=1:bframes=0:weightp=0",
                 "-c:a", "aac", "-b:a", "96k", "-ar", "44100",
-                "-shortest", "-movflags", "+faststart",
-                out_path,
-            ])
+                "-movflags", "+faststart",
+            ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+            # -t explícito garante que o FFmpeg sabe quando parar (sem depender do -shortest)
+            if audio_duration:
+                cmd += ["-t", str(audio_duration)]
+            else:
+                cmd += ["-shortest"]
+
+            cmd.append(out_path)
+
+            # Timeout baseado na duração: mínimo 120s, máximo 600s (10min)
+            timeout_s = min(600, max(120, int(audio_duration or 300) * 3)) if audio_duration else 600
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
 
         if result.returncode != 0:
-            print(f"DEBUG: [ERRO FFMPEG] {result.stderr}", flush=True)
-            return f"Erro FFmpeg", 500
+            lines = result.stderr.splitlines()
+            err = [l for l in lines if any(k in l for k in ("Error","error","Invalid","failed","Cannot","No such"))]
+            return f"Erro FFmpeg:\n{chr(10).join(err[-15:]) or result.stderr[-1000:]}", 500
 
         @after_this_request
         def _cleanup(response):
@@ -249,16 +280,22 @@ def converter():
 
         return send_file(out_path, mimetype="video/mp4", as_attachment=True, download_name="tron_clipe.mp4")
 
+    except subprocess.TimeoutExpired:
+        return "Tempo limite excedido. Tente com um áudio mais curto ou resolução menor.", 504
     except Exception:
-        err_trace = traceback.format_exc()
-        print(f"DEBUG: [ERRO INTERNO] {err_trace}", flush=True)
-        return f"Erro interno", 500
+        return f"Erro interno:\n{traceback.format_exc()}", 500
+
+# --- ROTAS DE SAÚDE E ERRO ---
 
 @app.route("/healthz")
 def healthz():
     return "OK", 200
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    return f"<pre>{traceback.format_exc()}</pre>", 500
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-            
+    
