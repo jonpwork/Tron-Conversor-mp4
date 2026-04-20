@@ -307,7 +307,19 @@ def converter():
             except Exception: pass
             return response
 
-        return send_file(out_path, mimetype="video/mp4", as_attachment=True, download_name="tron_clipe.mp4")
+        # Nome do arquivo: legenda (se tiver) ou nome do áudio, + timestamp único
+        import re
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if legenda_txt:
+            base = re.sub(r'[^\w\s-]', '', legenda_txt)[:40].strip().replace(' ', '_')
+        elif aud_file and aud_file.filename:
+            base = re.sub(r'[^\w\s-]', '', os.path.splitext(aud_file.filename)[0])[:40].strip().replace(' ', '_')
+        else:
+            base = "tron"
+        download_name = f"{base}_{ts}.mp4" if base else f"tron_{ts}.mp4"
+
+        return send_file(out_path, mimetype="video/mp4", as_attachment=True, download_name=download_name)
 
     except subprocess.TimeoutExpired:
         return "Tempo limite excedido. Tente com um áudio mais curto ou resolução menor.", 504
