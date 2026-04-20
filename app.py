@@ -28,10 +28,7 @@ RESOLUTIONS = {
     "1280x720":  ("1280", "720"),
 }
 
-# --- FUNÇÕES DE AUXÍLIO PARA FFmpeg ---
-
 def _esc_path(p):
-    """Escapa caminhos para filtros do FFmpeg (importante para Windows/Render)"""
     return p.replace("\\", "/").replace(":", "\\:")
 
 def _esc(txt):
@@ -40,8 +37,6 @@ def _esc(txt):
 def _ts_ass(s):
     h=int(s//3600); m=int((s%3600)//60); sc=int(s%60); cs=int(round((s-int(s))*100))
     return f"{h}:{m:02d}:{sc:02d}.{cs:02d}"
-
-# --- ROTAS E LÓGICA ---
 
 @app.route("/")
 def index():
@@ -149,7 +144,6 @@ def build_vf_estatico(w, h, legenda):
     if not legenda.strip(): return scale
     txt=_esc(legenda.strip())
     
-    # Escapando o caminho da fonte para o filtro drawtext
     fpath_esc = _esc_path(FONT_PATH)
     font=f"fontfile='{fpath_esc}'" if os.path.exists(FONT_PATH) else "font=Impact"
     
@@ -211,7 +205,6 @@ def converter():
                         with open(ass_path, "w", encoding="utf-8") as f:
                             f.write(gerar_ass(dados_ass, w, h, modo_dados))
                         
-                        # Escapando os caminhos para o filtro ASS do FFmpeg
                         ass_path_esc = _esc_path(ass_path)
                         fdir_esc     = _esc_path(FONTS_DIR)
                         
@@ -223,7 +216,6 @@ def converter():
             if ass_path is None and modo_leg == "estatica" and legenda_txt:
                 vf = build_vf_estatico(w_str, h_str, legenda_txt)
 
-            # --- AQUI ESTÁ O COMANDO ORIGINAL QUE FUNCIONOU ---
             cmd = [
                 "ffmpeg", "-y",
                 "-loop", "1",
@@ -247,6 +239,9 @@ def converter():
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=1200)
 
         if result.returncode != 0:
+            # MAGIA DA AURORA: Fazendo o erro imprimir nos logs do Google Cloud
+            print(f"==================== ERRO FFMPEG ====================\n{result.stderr}\n=====================================================", flush=True)
+            
             lines = result.stderr.splitlines()
             err = [l for l in lines if any(k in l for k in ("Error","error","Invalid","failed","Cannot","No such"))]
             return f"Erro FFmpeg:\n{chr(10).join(err[-15:]) or result.stderr[-1000:]}", 500
@@ -262,9 +257,10 @@ def converter():
     except subprocess.TimeoutExpired:
         return "Tempo limite excedido (20 min).", 504
     except Exception:
-        return f"Erro interno:\n{traceback.format_exc()}", 500
-
-# --- ROTAS DE SAÚDE E ERRO ---
+        err_trace = traceback.format_exc()
+        # Imprimindo qualquer erro interno oculto
+        print(f"==================== ERRO INTERNO ====================\n{err_trace}\n======================================================", flush=True)
+        return f"Erro interno:\n{err_trace}", 500
 
 @app.route("/healthz")
 def healthz():
@@ -277,3 +273,4 @@ def handle_exception(e):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+    
