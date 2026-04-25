@@ -54,36 +54,33 @@ def _ts_ass(s):
 #     movimento sem cortar rosto/texto importante.
 #   • Fallback seguro: se a duração do áudio não for conhecida, usa 180 s.
 # ---------------------------------------------------------------------------
-OUTPUT_FPS = 10   # frames por segundo do vídeo final — ótimo custo/benefício
+OUTPUT_FPS = 25   # 25fps — necessário para scale+t funcionar suavemente
 
 def build_motion_vf(w: int, h: int, audio_duration: float | None) -> str:
     """
-    Retorna a string completa de -vf com Ken Burns centrado.
-    Inclui escala inicial em 2x para o zoompan ter pixels sobrando.
+    Ken Burns rápido usando scale com expressão de tempo (t).
+    Muito mais veloz que zoompan — processa em paralelo, não frame-a-frame.
+    Zoom de 1.0 → 1.12 (12%) ao longo da duração — visível e suave.
     """
-    dur = max(1, int(audio_duration) if audio_duration else 180)
-    total_frames = dur * OUTPUT_FPS
+    dur = max(1, float(audio_duration) if audio_duration else 180.0)
 
-    # Velocidade de zoom por frame para ir de 1.0 → 1.06 em total_frames
-    zoom_step = round(0.06 / total_frames, 9)
+    # Fator de zoom máximo (12% maior que o original)
+    zoom_max = 1.12
 
-    # zoompan:
-    #   z  = cresce zoom_step por frame, limitado a 1.06
-    #   x/y = mantém o centro da imagem enquanto o zoom cresce
-    #        (sem pan lateral — mais seguro para não cortar texto/rosto)
+    # scale com expressão de tempo:
+    # iw*(1 + (zoom_max-1)*t/dur)  cresce de iw para iw*zoom_max
+    # crop central mantém enquadramento
+    zoom_expr_w = f"iw*({zoom_max}-(({zoom_max}-1)*({dur}-t)/{dur}))"
+    zoom_expr_h = f"ih*({zoom_max}-(({zoom_max}-1)*({dur}-t)/{dur}))"
+
     vf = (
-        # 1) redimensiona para 2× a resolução alvo (zoompan precisa de espaço)
+        # 1) garante resolução 2× para ter pixels de sobra pro crop
         f"scale={w*2}:{h*2}:force_original_aspect_ratio=increase,"
         f"crop={w*2}:{h*2},"
-        # 2) Ken Burns
-        f"zoompan="
-        f"z='min(zoom+{zoom_step},1.06)':"
-        f"x='iw/2-(iw/zoom/2)':"
-        f"y='ih/2-(ih/zoom/2)':"
-        f"d={total_frames}:"
-        f"s={w}x{h}:"
-        f"fps={OUTPUT_FPS},"
-        # 3) garante SAR correto
+        # 2) zoom crescente via scale com tempo
+        f"scale={zoom_expr_w}:{zoom_expr_h}:eval=frame,"
+        # 3) crop central para a resolução final
+        f"crop={w}:{h},"
         f"setsar=1"
     )
     return vf
@@ -337,7 +334,7 @@ def converter():
                 "ffmpeg", "-y",
                 "-f", "image2",
                 "-loop", "1",
-                "-framerate", str(OUTPUT_FPS),   # precisa bater com fps do zoompan
+                "-framerate", str(OUTPUT_FPS),
                 "-i", img_path,
                 "-i", aud_path,
                 "-vf", vf,
@@ -410,4 +407,4 @@ def handle_exception(e):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-    
+                                                              
